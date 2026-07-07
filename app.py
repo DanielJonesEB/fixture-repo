@@ -28,8 +28,7 @@ def greet():
 @app.route("/uppercase")
 def uppercase():
     text = request.args.get("text", "")
-    # BUG (code-review gate): endpoint is /uppercase but lowercases the input
-    return jsonify(result=text.lower())
+    return jsonify(result=text.upper())
 
 
 @app.route("/lookup")
