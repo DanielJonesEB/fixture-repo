@@ -1,0 +1,22 @@
+{
+  "about": "This file records WHY the commit carrying `Concausal-Fixes: 1c1cc028845190afe6f74dc53ba5c92ef8c423ae3728d60cdf061b11c8aa9113` was made: the job and step that failed and the resolved input versions it ran with (the conditions of the failure, not its cause). coordinate_id = sha256 over {pipeline_id, job, failed_step, sorted inputs}.",
+  "coordinate_id": "1c1cc028845190afe6f74dc53ba5c92ef8c423ae3728d60cdf061b11c8aa9113",
+  "failed_step": "unit-tests",
+  "inputs": [
+    {
+      "name": "source",
+      "resource_id": 47,
+      "version": {
+        "ref": "3f6a4dbe909f985fa16b5ca9585a064d1f573181"
+      }
+    }
+  ],
+  "job": "test",
+  "kind": "failure-coordinate",
+  "observed_build": {
+    "id": 17803,
+    "job": "test"
+  },
+  "pipeline_id": 22,
+  "status": "failed"
+}

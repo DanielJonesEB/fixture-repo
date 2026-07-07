@@ -22,8 +22,7 @@ def greet():
     lang = request.args.get("lang", "en")
     name = request.args.get("name", "world")
     greeting = GREETINGS.get(lang, GREETINGS["en"])
-    # BUG (test gate): missing comma and exclamation — tests expect "Hello, world!"
-    return jsonify(message=f"{greeting} {name}")
+    return jsonify(message=f"{greeting}, {name}!")
 
 
 @app.route("/uppercase")
