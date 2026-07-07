@@ -35,6 +35,5 @@ def uppercase():
 @app.route("/lookup")
 def lookup():
     host = request.args.get("host", "localhost")
-    # BUG (security gate): shell=True on user input — command injection
-    out = subprocess.check_output(f"nslookup {host}", shell=True)
+    out = subprocess.check_output(["nslookup", host])
     return out
