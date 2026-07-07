@@ -1,0 +1,88 @@
+platform: linux
+
+image_resource:
+  type: registry-image
+  source: { repository: node, tag: 20-slim }
+
+inputs:
+  - name: app
+  - name: report
+outputs:
+  - name: app
+
+params:
+  CLAUDE_CODE_OAUTH_TOKEN:
+  CONCERN: "a CI check"
+
+run:
+  path: bash
+  args:
+    - -ec
+    - |
+      apt-get update >/dev/null 2>&1
+      apt-get install -y git >/dev/null 2>&1
+      npm i -g @anthropic-ai/claude-code >/dev/null 2>&1
+      # Never auto-gc/repack: avoid rewriting the pack the put step reads.
+      git config --global gc.auto 0
+      git config --global maintenance.auto false
+
+      REPORT="$(cat report/output.txt 2>/dev/null || echo '(no report captured)')"
+
+      cd app
+      git config user.name "Claude (concausal)"
+      git config user.email "claude@concausal.local"
+
+      echo "────────────────────────────────────────────────────────"
+      echo "concausal · fix agent"
+      echo "  concern:    ${CONCERN}"
+      echo "  coordinate: ${CONCAUSAL_COORDINATE_ID:-<none>}"
+      echo "  Invoking Claude Code to correct the source…"
+      echo "  (Claude batches its output — expect a pause, then a burst on completion.)"
+      echo "────────────────────────────────────────────────────────"
+
+      claude -p "A CI check failed: ${CONCERN}.
+
+      Check output:
+      ${REPORT}
+
+      Fix the underlying issue in the application source. Do NOT weaken, skip, or delete the check or the tests. Make the minimal change that makes the check pass legitimately. Change ONLY what is required for THIS specific check to pass; do not fix, refactor, or improve unrelated code, even if you notice other problems elsewhere in the file." \
+        --permission-mode acceptEdits \
+        --allowedTools "Read,Edit,Write,Bash"
+
+      git add -A
+      if git diff --cached --quiet; then
+        echo "NO-CHANGE: agent produced no edits"
+        exit 1
+      fi
+
+      # Concausal: write the coordinate document (+ a directory README) so the repo
+      # self-explains what the Concausal-Fixes trailer means — on the same commit.
+      if [ -n "${CONCAUSAL_COORDINATE_ID:-}" ] && [ -n "${CONCAUSAL_COORDINATE_JSON:-}" ]; then
+        mkdir -p .concausal/failures
+        [ -f .concausal/README.md ] || printf '%s\n' \
+          '# .concausal/' '' \
+          'Machine-written provenance for agent-applied fixes.' '' \
+          '`failures/<coordinate-id>.json` records a build failure that an agent fixed:' \
+          'the job and step that failed, and the resolved input versions it ran with.' \
+          'A fix commit links to its failure via a `Concausal-Fixes: <coordinate-id>`' \
+          'commit trailer; this directory explains those ids.' \
+          > .concausal/README.md
+        printf '%s' "$CONCAUSAL_COORDINATE_JSON" \
+          | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.stringify(JSON.parse(s),null,2)+"\n")}catch(e){process.stdout.write(s)}})' \
+          > ".concausal/failures/${CONCAUSAL_COORDINATE_ID}.json"
+        git add .concausal
+      fi
+
+      # Concausal trailer: link this fix commit back to the failure coordinate
+      # that core computed and exposed via env (present only under our fork).
+      if [ -n "${CONCAUSAL_COORDINATE_ID:-}" ]; then
+        echo "CONCAUSAL_COORDINATE_ID=${CONCAUSAL_COORDINATE_ID}"
+        git commit -m "fix: ${CONCERN}" -m "Concausal-Fixes: ${CONCAUSAL_COORDINATE_ID}"
+      else
+        git commit -m "fix: ${CONCERN}"
+      fi
+
+      # Rewrite objects into a fresh pack so the git-resource put (privileged
+      # container) reads a clean packfile across the task->put volume handoff.
+      git repack -ad
+      git prune-packed || true

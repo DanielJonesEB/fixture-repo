@@ -1,0 +1,48 @@
+platform: linux
+
+image_resource:
+  type: registry-image
+  source: { repository: node, tag: 20-slim }
+
+inputs:
+  - name: app
+outputs:
+  - name: app
+
+params:
+  CLAUDE_CODE_OAUTH_TOKEN:
+
+run:
+  path: bash
+  args:
+    - -ec
+    - |
+      apt-get update >/dev/null 2>&1
+      apt-get install -y git >/dev/null 2>&1
+      npm i -g @anthropic-ai/claude-code >/dev/null 2>&1
+      git config --global gc.auto 0
+      git config --global maintenance.auto false
+
+      cd app
+      git config user.name "Claude (concausal review)"
+      git config user.email "review@concausal.local"
+
+      echo "────────────────────────────────────────────────────────"
+      echo "concausal · code-review agent"
+      echo "  Invoking Claude Code to review the changes for defects…"
+      echo "  (Claude batches its output — expect a pause, then a burst on completion.)"
+      echo "────────────────────────────────────────────────────────"
+
+      claude -p "You are reviewing this small Flask service. Fix ONLY definite, objective DEFECTS: an actual bug that causes wrong behaviour or a crash, or a genuine security vulnerability. Do NOT add features, input validation, logging, docstrings, type hints, comments, or tests; do NOT refactor or make stylistic/defensive changes. The normal, expected outcome is that the code is fine and you make NO changes at all — in that case change nothing and finish." \
+        --permission-mode acceptEdits \
+        --allowedTools "Read,Edit,Write,Bash"
+
+      git add -A
+      if git diff --cached --quiet; then
+        echo "review: no issues found; no changes"
+        exit 0
+      fi
+
+      git commit -m "review: address issues found in qualitative review"
+      git repack -ad
+      git prune-packed || true

@@ -1,0 +1,127 @@
+# greeter — a believable agent-fix pipeline.
+#
+#   source (git) ─▶ test ─▶ security ─▶ review ─▶ ship ─▶ image (registry)
+#
+# Each gate can self-heal: test (pytest) and security (bandit) run a coding
+# agent in on_failure that fixes the source and pushes back; review runs the
+# agent qualitatively on every green run. ship builds a Docker image and
+# pushes it to a local registry. Self-set from this file in the repo.
+
+resources:
+  - name: source
+    type: git
+    icon: github
+    check_every: 10s
+    source:
+      uri: git@github.com:DanielJonesEB/fixture-repo.git
+      branch: main
+      private_key: ((git_private_key))
+
+  - name: image
+    type: registry-image
+    icon: docker
+    source:
+      repository: registry:5000/example-app
+      tag: latest
+      insecure: true
+
+jobs:
+  - name: test
+    plan:
+      - get: source
+        trigger: true
+      - task: unit-tests
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source: { repository: python, tag: 3.12-slim }
+          inputs: [{ name: source, path: app }]
+          outputs: [{ name: report }]
+          run:
+            path: bash
+            args:
+              - -ec
+              - |
+                pip install -q pytest flask >/dev/null 2>&1
+                cd app
+                pytest -q 2>&1 | tee ../report/output.txt; ec=${PIPESTATUS[0]}
+                exit $ec
+        on_failure:
+          do:
+            - task: claude-fix
+              file: source/ci/tasks/claude-fix.yml
+              input_mapping: { app: source }
+              output_mapping: { app: source }
+              params:
+                CLAUDE_CODE_OAUTH_TOKEN: ((claude_token))
+                CONCERN: "the unit tests are failing"
+            - put: source
+              params: { repository: source, rebase: true }
+
+  - name: security
+    plan:
+      - get: source
+        trigger: true
+        passed: [test]
+      - task: sast
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source: { repository: python, tag: 3.12-slim }
+          inputs: [{ name: source, path: app }]
+          outputs: [{ name: report }]
+          run:
+            path: bash
+            args:
+              - -ec
+              - |
+                pip install -q bandit >/dev/null 2>&1
+                cd app
+                bandit -r . -x ./ci,./test_app.py --severity-level medium 2>&1 | tee ../report/output.txt; ec=${PIPESTATUS[0]}
+                exit $ec
+        on_failure:
+          do:
+            - task: claude-fix
+              file: source/ci/tasks/claude-fix.yml
+              input_mapping: { app: source }
+              output_mapping: { app: source }
+              params:
+                CLAUDE_CODE_OAUTH_TOKEN: ((claude_token))
+                CONCERN: "bandit found a security vulnerability"
+            - put: source
+              params: { repository: source, rebase: true }
+
+  - name: code-review
+    plan:
+      - get: source
+        trigger: true
+        passed: [security]
+      - task: claude-review
+        file: source/ci/tasks/claude-review.yml
+        input_mapping: { app: source }
+        output_mapping: { app: source }
+        params:
+          CLAUDE_CODE_OAUTH_TOKEN: ((claude_token))
+      - put: source
+        params: { repository: source, rebase: true }
+
+  - name: ship
+    plan:
+      - get: source
+        trigger: true
+        passed: [code-review]
+      - task: build
+        privileged: true
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source: { repository: concourse/oci-build-task }
+          inputs: [{ name: source, path: app }]
+          outputs: [{ name: image }]
+          params: { CONTEXT: app }
+          run: { path: build }
+      - put: image
+        params: { image: image/image.tar }
